@@ -16,6 +16,9 @@
 
 #include "utility.hpp"
 
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
+
 class MonocularSlamNode : public rclcpp::Node
 {
 public:
@@ -33,6 +36,9 @@ private:
     cv_bridge::CvImagePtr m_cvImPtr;
 
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr m_image_subscriber;
+    
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr m_pointcloud_pub;
+    rclcpp::TimerBase::SharedPtr timer_;
 
     // Create a tf broadcaster to broadcast the camera pose
     void BroadcastCameraTransform(Sophus::SE3f Tcw);
@@ -40,7 +46,7 @@ private:
 
     // create a static tf broadcaster to broadcast the telloBase_link to camera_link
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> m_static_tf_broadcaster_;
-
+    void PublishMapPointsAsPointCloud();
 
 };
 

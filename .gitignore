@@ -1,2 +1,5 @@
 vocabulary/ORBvoc.txt
 config/isaac
+/build
+/log
+/install

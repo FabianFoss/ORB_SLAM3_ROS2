@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 project(orbslam3)
 
 # You should set the PYTHONPATH to your own python site-packages path
-set(ENV{PYTHONPATH} "/opt/ros/foxy/lib/python3.8/site-packages/")
+set(ENV{PYTHONPATH} "/opt/ros/humble/lib/python3.10/site-packages/")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules)
 
@@ -55,20 +55,20 @@ add_executable(rgbd
 )
 ament_target_dependencies(rgbd rclcpp sensor_msgs cv_bridge message_filters ORB_SLAM3 Pangolin)
 
-add_executable(stereo
-  src/stereo/stereo.cpp
-  src/stereo/stereo-slam-node.cpp
-)
-ament_target_dependencies(stereo rclcpp sensor_msgs cv_bridge message_filters
-ORB_SLAM3 Pangolin)
+# add_executable(stereo
+#   src/stereo/stereo.cpp
+#   src/stereo/stereo-slam-node.cpp
+# )
+# ament_target_dependencies(stereo rclcpp sensor_msgs cv_bridge message_filters
+# ORB_SLAM3 Pangolin)
 
-add_executable(stereo-inertial
-  src/stereo-inertial/stereo-inertial.cpp
-  src/stereo-inertial/stereo-inertial-node.cpp
-)
-ament_target_dependencies(stereo-inertial rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin)
+# add_executable(stereo-inertial
+#   src/stereo-inertial/stereo-inertial.cpp
+#   src/stereo-inertial/stereo-inertial-node.cpp
+# )
+# ament_target_dependencies(stereo-inertial rclcpp sensor_msgs cv_bridge ORB_SLAM3 Pangolin)
 
-install(TARGETS mono mono-inertial rgbd stereo stereo-inertial
+install(TARGETS mono mono-inertial rgbd
   DESTINATION lib/${PROJECT_NAME})
 
 # Install launch files.

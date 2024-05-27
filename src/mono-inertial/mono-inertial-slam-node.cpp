@@ -14,17 +14,13 @@ MonoInertialSlamNode::MonoInertialSlamNode(ORB_SLAM3::System* pSLAM)
     // set subscriber qos profile best effort rclcpp::SensorDataQoS()
     auto qos = rclcpp::SensorDataQoS();
 
-    m_image_subscriber = this->create_subscription<ImageMsg>(
-        "/tello/camera/image_synced",
-        qos,
-        std::bind(&MonoInertialSlamNode::GrabImage, this, std::placeholders::_1));
-    std::cout << "slam changed" << std::endl;
+    m_image_subscriber = this->create_subscription<ImageMsg>("camera", qos, std::bind(&MonoInertialSlamNode::GrabImage, this, std::placeholders::_1));
+    
+    m_imu_subscriber = this->create_subscription<ImuMsg>("imu", qos, std::bind(&MonoInertialSlamNode::GrabImu, this, std::placeholders::_1));
 
-    m_imu_subscriber = this->create_subscription<ImuMsg>(
-        "/tello/imu/data_synced",
-        qos,
-        std::bind(&MonoInertialSlamNode::GrabImu, this, std::placeholders::_1));
-
+    // m_pointcloud_pub = this->create_publisher<sensor_msgs::msg::PointCloud2>("cloud_in", 10);
+    // timer_ = this->create_wall_timer(std::chrono::seconds(5), std::bind(&MonoInertialSlamNode::PublishMapPointsAsPointCloud, this));
+    
     // Create a tf broadcaster to broadcast the camera pose
     m_tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     
@@ -32,6 +28,7 @@ MonoInertialSlamNode::MonoInertialSlamNode(ORB_SLAM3::System* pSLAM)
     m_static_tf_broadcaster_ = std::make_shared<tf2_ros::StaticTransformBroadcaster>(*this);
 
     syncThread = new std::thread(&MonoInertialSlamNode::SyncWithImu, this);
+    std::cout << "here" << std::endl;
 }
 
 MonoInertialSlamNode::~MonoInertialSlamNode()
@@ -127,14 +124,19 @@ void MonoInertialSlamNode::SyncWithImu()
                 }
             }
             mutexImuQueue.unlock();
-            // prinst length of imu measurements
-            // std::cout<<"imu measurements length: "<<vImuMeas.size()<<std::endl;
 
-            // std::cout<<"one frame has been sent"<<std::endl;
-            Sophus::SE3f Tcw = m_SLAM->TrackMonocular(img, tImg, vImuMeas);
-            // Sophus::SE3f Tcw = m_SLAM->TrackMonocular(img, tImg);
-            this->BroadcastCameraTransform(Tcw);
+            try 
+            {
+                Sophus::SE3f Tcw = m_SLAM->TrackMonocular(img, tImg, vImuMeas);
+                // Sophus::SE3f Tcw = m_SLAM->TrackMonocular(img, tImg);
+                this->BroadcastCameraTransform(Tcw);
+            }
             
+            catch (const std::exception& e) 
+            {
+                std::cerr << "Exception caught: " << e.what() << std::endl;
+            }
+
         }
         std::chrono::milliseconds tSleep(1);
         std::this_thread::sleep_for(tSleep);
@@ -158,8 +160,8 @@ void MonoInertialSlamNode::BroadcastCameraTransform(Sophus::SE3f Tcw)
     // Create a transform from world to camera
     geometry_msgs::msg::TransformStamped transform_stamped;
     transform_stamped.header.stamp = rclcpp::Clock().now();
-    transform_stamped.header.frame_id = "world";
-    transform_stamped.child_frame_id = "telloCamera";
+    transform_stamped.header.frame_id = "odom";
+    transform_stamped.child_frame_id = "camera_depth_frame";
     transform_stamped.transform.translation.x = t.x();
     transform_stamped.transform.translation.y = t.y();
     transform_stamped.transform.translation.z = t.z();
@@ -175,8 +177,8 @@ void MonoInertialSlamNode::BroadcastCameraTransform(Sophus::SE3f Tcw)
     // Create a static transform from telloCamera to telloIMU
     geometry_msgs::msg::TransformStamped static_transform_stamped;
     static_transform_stamped.header.stamp = rclcpp::Clock().now();
-    static_transform_stamped.header.frame_id = "telloCamera";
-    static_transform_stamped.child_frame_id = "tellIMU";
+    static_transform_stamped.header.frame_id = "camera_depth_frame";
+    static_transform_stamped.child_frame_id = "imu";
     static_transform_stamped.transform.translation.x = 0.0;
     static_transform_stamped.transform.translation.y = -0.0028;
     static_transform_stamped.transform.translation.z = -0.043;
@@ -191,3 +193,101 @@ void MonoInertialSlamNode::BroadcastCameraTransform(Sophus::SE3f Tcw)
     // Send the static transform
     m_static_tf_broadcaster_->sendTransform(static_transform_stamped);
 }
+
+void MonoInertialSlamNode::PublishMapPointsAsPointCloud()
+{
+    // https://github.com/appliedAI-Initiative/orb_slam_2_ros/blob/master/ros/src/Node.cc#L232
+    try 
+    {
+        auto map_points = m_SLAM->GetTrackedMapPoints(); 
+
+        if (map_points.empty()) {
+            std::cout << "Map point vector is empty!" << std::endl;
+            return; // Exit if no map points
+        }
+
+        sensor_msgs::msg::PointCloud2 cloud;
+        cloud.header.stamp = rclcpp::Clock().now();
+        cloud.header.frame_id = "map";
+        cloud.height = 1; // single row
+        cloud.width = map_points.size();
+        cloud.is_bigendian = false;
+        cloud.is_dense = true; // no invalid points
+        cloud.point_step = 3 * sizeof(float); // 3 floats per point
+        cloud.row_step = cloud.point_step * cloud.width;
+        cloud.fields.resize(3);
+
+        std::string channel_id[] = {"x", "y", "z"};
+        for (int i = 0; i < 3; i++) {
+            cloud.fields[i].name = channel_id[i];
+            cloud.fields[i].offset = i * sizeof(float);
+            cloud.fields[i].count = 1;
+            cloud.fields[i].datatype = sensor_msgs::msg::PointField::FLOAT32;
+        }
+
+        cloud.data.resize(cloud.row_step * cloud.height);
+
+        for (size_t i = 0; i < cloud.width; i++) {
+            if (map_points.at(i) && map_points.at(i)->nObs >= 2) {
+                Eigen::Vector3f coords = map_points.at(i)->GetWorldPos();
+                std::array<float, 3> data_array = {
+                    coords[2],  // Use z for x
+                    -coords[0], // Use -x for y
+                    -coords[1]  // Use -y for z
+                };
+
+                std::memcpy(&cloud.data[i * cloud.point_step], data_array.data(), cloud.point_step);
+            }
+        }
+
+        m_pointcloud_pub->publish(cloud);
+    }
+
+    catch (const std::exception& e) 
+    {
+        std::cerr << "Exception caught: " << e.what() << std::endl;
+    }
+
+}
+
+
+    // auto mapPoints = m_SLAM->GetTrackedMapPoints(); // Assuming such a function exists to get all map points
+    // sensor_msgs::msg::PointCloud2 cloud;
+    // cloud.header.frame_id = "map"; // Use appropriate frame_id
+    // cloud.header.stamp = rclcpp::Clock().now();
+    // cloud.width = mapPoints.size();
+    
+    // sensor_msgs::PointCloud2Modifier modifier(cloud);
+    // modifier.setPointCloud2Fields(3, "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+    //                                  "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+    //                                  "z", 1, sensor_msgs::msg::PointField::FLOAT32);
+    // modifier.resize(mapPoints.size());
+
+    // sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
+    // sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
+    // sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
+
+
+
+    // for (const auto& point : mapPoints)
+    // {
+    //     if (!point) { // Check if the pointer is null
+    //         cout << "Encountered a null MapPoint pointer." << endl;
+    //         continue; // Skip this iteration
+    //     }
+
+    // // Safe to access methods on point now
+    //     if (point->isBad()) {
+    //         cout << "MapPoint is marked as bad." << endl;
+    //         continue;
+    //     }
+
+    //     Eigen::Vector3f pos = point->GetWorldPos();
+    //     *iter_x = pos.x();
+    //     *iter_y = pos.y();
+    //     *iter_z = pos.z();
+    //     ++iter_x;
+    //     ++iter_y;
+    //     ++iter_z; 
+    // }
+    // m_pointcloud_pub->publish(cloud);

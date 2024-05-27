@@ -9,13 +9,15 @@
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
-
 #include "System.h"
 #include "Frame.h"
 #include "Map.h"
 #include "Tracking.h"
 
 #include "utility.hpp"
+
+#include "sensor_msgs/msg/point_cloud2.hpp"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
 
 using ImageMsg = sensor_msgs::msg::Image;
 using ImuMsg = sensor_msgs::msg::Imu;
@@ -36,12 +38,13 @@ private:
 
     rclcpp::Subscription<ImageMsg>::SharedPtr m_image_subscriber;
     rclcpp::Subscription<ImuMsg>::SharedPtr m_imu_subscriber;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr m_pointcloud_pub;
+    rclcpp::TimerBase::SharedPtr timer_;
 
     queue<ImuMsg::SharedPtr> imu_queue;
     std::mutex mutexImuQueue;
     queue<ImageMsg::SharedPtr> image_queue;
     std::mutex mutexImageQueue;
-
 
     float time_shift = -0.08702715681391279; // timeshift cam0 to imu0: [s] (t_imu = t_cam + shift)
 
@@ -55,8 +58,7 @@ private:
     // static telloBase_link to camera_link tf
     std::shared_ptr<tf2_ros::StaticTransformBroadcaster> m_static_tf_broadcaster_;
 
-
-
+    void PublishMapPointsAsPointCloud();
 
 };
 
